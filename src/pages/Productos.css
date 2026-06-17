@@ -1,0 +1,97 @@
+.productos-container {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20px;
+  padding-bottom: 80px; /* espacio para la barra inferior */
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.productos-container h2 {
+  text-align: center;
+  margin-bottom: 20px;
+  color: #333;
+}
+
+.productos-container ul {
+  list-style-type: none;
+  padding: 0;
+}
+
+.productos-container li {
+  padding: 10px 15px;
+  margin-bottom: 10px;
+  background: #f1f1f1;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+}
+
+.form-agregar {
+  margin: 20px 0;
+  display: flex;
+  gap: 10px;
+}
+
+.form-agregar input {
+  flex: 1;
+  padding: 10px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+.form-agregar button {
+  background-color: #000000;
+  color: white;
+  border: none;
+  padding: 10px 15px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.botonera-inferior {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: #ffffff;
+  border-top: 1px solid #ccc;
+  display: flex;
+  justify-content: space-around;
+  padding: 10px;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.botonera-inferior button {
+  flex: 1;
+  margin: 0 5px;
+  padding: 12px;
+  font-size: 16px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.botonera-inferior button:hover {
+  background-color: #0056b3;
+}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+@layer components {
+  .button {
+    @apply to-black text-white rounded px-4 py-2;
+  }
+  .button:hover {
+    @apply bg-blue-600;
+  }
+  .button-secondary {
+    @apply bg-gray-500 text-white rounded px-4 py-2;
+  }
+  .button-secondary:hover {
+    @apply bg-gray-600;
+  }
+}
