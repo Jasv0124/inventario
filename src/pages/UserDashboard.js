@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { collection, onSnapshot, doc, updateDoc, addDoc, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, addDoc, query, where, getDocs } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, db, storage } from '../firebase';
 import { getAuth, signOut } from 'firebase/auth';
@@ -9,7 +9,7 @@ import {
   Package, Search, Clock, LogOut, X, 
   ChevronRight, Camera, AlertTriangle, 
   CheckCircle2, Loader2, User, Hash, 
-  Ruler, LayoutDashboard, Info, Image as ImageIcon
+  Ruler, LayoutDashboard
 } from 'lucide-react';
 
 // Importación del historial (asumiendo que existe en la misma carpeta)
@@ -53,15 +53,14 @@ function UserDashboard() {
   const [searchTerm, setSearchTerm] = useState("");
   const [modalEntregarOpen, setModalEntregarOpen] = useState(false);
   const [productoSeleccionado, setProductoSeleccionado] = useState(null);
-  const [cantidadEntregar, setCantidadEntregar] = useState(1);
+  const [cantidadEntregar] = useState(1);
   const [entregadoA, setEntregadoA] = useState('');
   const [cedula, setCedula] = useState('');
   const [genero, setGenero] = useState('');
   const [talla, setTalla] = useState('');
   const [evidenciaFoto, setEvidenciaFoto] = useState(null);
   const [evidenciaDanio, setEvidenciaDanio] = useState(null);
-  const [isUserBlocked, setIsUserBlocked] = useState(false);
-  const [isBlockedForAllProducts, setIsBlockedForAllProducts] = useState(false);
+  const isBlockedForAllProducts = false;
   const [showEvidenciaDanio, setShowEvidenciaDanio] = useState(false);
   const [mostrarHistorial, setMostrarHistorial] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -73,22 +72,31 @@ function UserDashboard() {
   // ─── LÓGICA ORIGINAL (MANTENIDA) ────────────────────────────────────────────
 
   useEffect(() => {
-    const unsubscribeAuth = auth.onAuthStateChanged(user => {
-      if (!user) navigate('/login');
-    });
+    let unsubscribeProducts = () => {};
 
-    const unsubscribeProducts = onSnapshot(
-      collection(db, 'productos'),
-      (snapshot) => {
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setProductos(data);
-        setIsLoading(false);
-      },
-      (err) => {
-        setError('Error al cargar productos');
-        setIsLoading(false);
+    const unsubscribeAuth = auth.onAuthStateChanged(user => {
+      if (!user) {
+        navigate('/login');
+        return;
       }
-    );
+
+      setIsLoading(true);
+      unsubscribeProducts();
+      unsubscribeProducts = onSnapshot(
+        collection(db, 'productos'),
+        (snapshot) => {
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setProductos(data);
+          setError(null);
+          setIsLoading(false);
+        },
+        (err) => {
+          console.error(err);
+          setError('Error al cargar productos');
+          setIsLoading(false);
+        }
+      );
+    });
 
     return () => {
       unsubscribeAuth();
@@ -106,7 +114,7 @@ function UserDashboard() {
 
   const isSizeFilteredProduct = (producto) => {
     if (!producto) return false;
-    const nombreLower = producto.nombre.toLowerCase().trim();
+    const nombreLower = (producto.nombre || '').toLowerCase().trim();
     return (
       nombreLower.includes('camiseta') || nombreLower.includes('guante') ||
       nombreLower.includes('bota') || nombreLower.includes('pantalon') ||
@@ -140,20 +148,6 @@ function UserDashboard() {
       console.error(e);
       return false; 
     }
-  };
-
-  const checkUserBlockedForAll = async (cedulaVal) => {
-    try {
-      if (!cedulaVal) return false;
-      const q = query(
-        collection(db, 'historial'), 
-        where('cedula', '==', cedulaVal.trim()), 
-        orderBy('fecha', 'desc'), 
-        limit(1)
-      );
-      const snap = await getDocs(q);
-      return false; 
-    } catch (e) { return false; }
   };
 
   const validateForm = () => {
@@ -239,7 +233,7 @@ function UserDashboard() {
   // ─── FILTROS Y MEMO ─────────────────────────────────────────────────────────
 
   const filteredProductos = productos.filter(p => 
-    p.nombre.toLowerCase().includes(searchTerm.toLowerCase())
+    (p.nombre || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const availableGeneros = useMemo(() => 
@@ -283,6 +277,18 @@ function UserDashboard() {
           <Historial />
         ) : (
           <>
+            {error && (
+              <div className="mb-6 flex items-center justify-between gap-3 bg-red-50 border border-red-100 text-red-600 rounded-2xl px-4 py-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <AlertTriangle size={18} className="shrink-0" />
+                  <p className="text-sm font-bold truncate">{error}</p>
+                </div>
+                <button onClick={() => setError(null)} className="w-8 h-8 rounded-xl bg-white/70 flex items-center justify-center hover:bg-white transition-all">
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+
             {/* Buscador */}
             <div className="relative mb-8">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />

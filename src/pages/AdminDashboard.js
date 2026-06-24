@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { collection, getDocs, addDoc, deleteDoc, doc } from 'firebase/firestore';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { collection, getDocs, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { db, storage, auth } from '../firebase';
@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { 
   Plus, Trash2, Download, LogOut, UserPlus, 
   Package, Users, LayoutDashboard, Image as ImageIcon,
-  ChevronRight, X, AlertCircle, Loader2, Clock
+  ChevronRight, X, AlertCircle, Loader2, Clock, CheckCircle2, Eye
 } from 'lucide-react';
 
 // ─── COMPONENTE PRINCIPAL ─────────────────────────────────────────────────────
@@ -19,12 +19,16 @@ function AdminDashboard() {
   const [tallas, setTallas] = useState([{ genero: '', talla: '', cantidad: '' }]);
   const [imagen, setImagen] = useState(null);
   const [usuarios, setUsuarios] = useState([]);
+  const [productos, setProductos] = useState([]);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingProductos, setIsLoadingProductos] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [formErrors, setFormErrors] = useState({});
+  const imageInputRef = useRef(null);
   const navigate = useNavigate();
 
   // ─── EFECTOS ────────────────────────────────────────────────────────────────
@@ -33,6 +37,7 @@ function AdminDashboard() {
     const unsubscribe = auth.onAuthStateChanged(user => {
       if (user) {
         fetchUsuarios();
+        fetchProductos();
       } else {
         navigate('/login');
       }
@@ -53,6 +58,20 @@ function AdminDashboard() {
       setError('Error al cargar usuarios');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchProductos = async () => {
+    try {
+      setIsLoadingProductos(true);
+      const snap = await getDocs(collection(db, 'productos'));
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setProductos(list);
+    } catch (e) {
+      console.error(e);
+      setError('Error al cargar productos');
+    } finally {
+      setIsLoadingProductos(false);
     }
   };
 
@@ -94,12 +113,6 @@ function AdminDashboard() {
 
     try {
       setIsSubmitting(true);
-      let imageUrl = '';
-      if (imagen) {
-        const imgRef = ref(storage, `productos/${uuidv4()}-${imagen.name}`);
-        const snap = await uploadBytes(imgRef, imagen);
-        imageUrl = await getDownloadURL(snap.ref);
-      }
 
       const tallasObj = tallas.reduce((acc, { genero, talla, cantidad }) => {
         if (!acc[genero]) acc[genero] = {};
@@ -109,18 +122,27 @@ function AdminDashboard() {
 
       const total = tallas.reduce((sum, t) => sum + (parseInt(t.cantidad) || 0), 0);
 
-      await addDoc(collection(db, 'productos'), {
+      const productoData = {
         nombre,
         tallas: tallasObj,
         cantidad: total,
-        imagen: imageUrl,
+        imagen: '',
         fechaCreacion: new Date()
-      });
+      };
+
+      const docRef = await addDoc(collection(db, 'productos'), productoData);
+      setProductos(prev => [{ id: docRef.id, ...productoData }, ...prev]);
+      setShowSuccessModal(true);
 
       setNombre('');
       setTallas([{ genero: '', talla: '', cantidad: '' }]);
+      const imagenParaSubir = imagen;
       setImagen(null);
-      alert('Producto guardado exitosamente');
+      if (imageInputRef.current) imageInputRef.current.value = '';
+
+      if (imagenParaSubir) {
+        uploadProductImage(docRef.id, imagenParaSubir);
+      }
     } catch (e) {
       console.error(e);
       setError('Error al guardar producto');
@@ -129,15 +151,42 @@ function AdminDashboard() {
     }
   };
 
+  const uploadProductImage = async (productId, file) => {
+    try {
+      const imgRef = ref(storage, `productos/${productId}/${uuidv4()}-${file.name}`);
+      const snap = await uploadBytes(imgRef, file);
+      const imageUrl = await getDownloadURL(snap.ref);
+      await updateDoc(doc(db, 'productos', productId), { imagen: imageUrl });
+      setProductos(prev => prev.map(producto => (
+        producto.id === productId ? { ...producto, imagen: imageUrl } : producto
+      )));
+    } catch (e) {
+      console.error(e);
+      setError('Producto guardado, pero no se pudo subir la imagen');
+    }
+  };
+
   const exportToExcel = async (type) => {
     setIsExporting(true);
     try {
       let data = [];
       const snap = await getDocs(collection(db, type));
-      const items = snap.docs.map(d => d.data());
+      const items = type === 'productos'
+        ? mergeProductosForExport(productos, snap.docs.map(d => ({ id: d.id, ...d.data() })))
+        : snap.docs.map(d => d.data());
       
       if (type === 'productos') {
         items.forEach(p => {
+          if (!p.tallas || Object.keys(p.tallas).length === 0) {
+            data.push({
+              Producto: p.nombre || 'Sin nombre',
+              Genero: 'N/A',
+              Talla: 'N/A',
+              Cantidad: p.cantidad || 0
+            });
+            return;
+          }
+
           Object.keys(p.tallas || {}).forEach(g => {
             Object.keys(p.tallas[g] || {}).forEach(t => {
               data.push({ 
@@ -173,6 +222,10 @@ function AdminDashboard() {
     return tallas.reduce((s, t) => s + (parseInt(t.cantidad) || 0), 0);
   }, [tallas]);
 
+  const totalProductosRegistrados = useMemo(() => {
+    return productos.reduce((sum, producto) => sum + (parseInt(producto.cantidad) || 0), 0);
+  }, [productos]);
+
   // ─── RENDERIZADO ────────────────────────────────────────────────────────────
 
   return (
@@ -202,7 +255,18 @@ function AdminDashboard() {
       </nav>
 
       <main className="max-w-5xl mx-auto px-6 py-10 grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
+        {error && (
+          <div className="lg:col-span-12 flex items-center justify-between gap-3 bg-red-50 border border-red-100 text-red-600 rounded-2xl px-4 py-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertCircle size={18} className="shrink-0" />
+              <p className="text-sm font-bold truncate">{error}</p>
+            </div>
+            <button onClick={() => setError(null)} className="w-8 h-8 rounded-xl bg-white/70 flex items-center justify-center hover:bg-white transition-all">
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
         {/* ── COLUMNA IZQUIERDA ── */}
         <div className="lg:col-span-7 space-y-8">
           <div className="bg-white rounded-[32px] border border-slate-100 p-6 shadow-sm">
@@ -281,7 +345,7 @@ function AdminDashboard() {
                   <p className="text-xl font-black text-indigo-600">{totalInventario} <span className="text-xs font-bold">Unidades</span></p>
                 </div>
                 <label className="cursor-pointer group">
-                  <input type="file" className="hidden" onChange={e => setImagen(e.target.files[0])} />
+                  <input ref={imageInputRef} type="file" className="hidden" onChange={e => setImagen(e.target.files[0])} />
                   <div className="flex items-center gap-2 bg-white px-4 py-2.5 rounded-xl border border-indigo-100 text-xs font-bold text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-sm">
                     <ImageIcon size={16} /> {imagen ? 'Cambiar Foto' : 'Subir Foto'}
                   </div>
@@ -327,6 +391,66 @@ function AdminDashboard() {
           </div>
 
           <div className="bg-white rounded-[32px] border border-slate-100 p-6 shadow-sm">
+            <div className="flex items-center justify-between gap-4 mb-6">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-cyan-50 flex items-center justify-center text-cyan-600">
+                  <Package size={24} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 tracking-tight">Productos</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Inventario registrado</p>
+                </div>
+              </div>
+              <button
+                onClick={() => navigate('/productos-admin')}
+                className="w-10 h-10 rounded-2xl bg-slate-50 text-slate-500 flex items-center justify-center hover:bg-cyan-50 hover:text-cyan-600 transition-all"
+                title="Ver todos los productos"
+              >
+                <Eye size={18} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Productos</p>
+                <p className="text-2xl font-black text-slate-900">{productos.length}</p>
+              </div>
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Unidades</p>
+                <p className="text-2xl font-black text-slate-900">{totalProductosRegistrados}</p>
+              </div>
+            </div>
+            
+            <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
+              {isLoadingProductos ? (
+                [1,2,3].map(i => <div key={i} className="h-16 bg-slate-50 rounded-2xl animate-pulse" />)
+              ) : productos.length === 0 ? (
+                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 text-center">
+                  <p className="text-sm font-black text-slate-700">No hay productos registrados</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Agrega el primero desde el formulario</p>
+                </div>
+              ) : productos.map(producto => (
+                <div key={producto.id} className="flex items-center justify-between gap-3 p-3 bg-slate-50 rounded-2xl border border-slate-100/50 hover:bg-white hover:border-cyan-100 transition-all">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shrink-0">
+                      {producto.imagen ? (
+                        <img src={producto.imagen} alt={producto.nombre} className="w-full h-full object-cover" />
+                      ) : (
+                        <Package size={18} className="text-slate-300" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-black text-slate-800 truncate">{producto.nombre}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">{producto.cantidad || 0} unidades</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-slate-300 shrink-0" />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-[32px] border border-slate-100 p-6 shadow-sm">
             <div className="flex items-center gap-4 mb-6">
               <div className="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600">
                 <Users size={24} />
@@ -361,6 +485,32 @@ function AdminDashboard() {
         </div>
       </main>
 
+      {/* ── MODAL DE ÉXITO ── */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm" onClick={() => setShowSuccessModal(false)} />
+          <div className="relative w-full max-w-sm bg-white rounded-[32px] p-8 shadow-2xl text-center">
+            <button
+              onClick={() => setShowSuccessModal(false)}
+              className="absolute top-4 right-4 w-9 h-9 rounded-xl bg-slate-50 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-all flex items-center justify-center"
+            >
+              <X size={18} />
+            </button>
+            <div className="w-16 h-16 mx-auto rounded-3xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-5">
+              <CheckCircle2 size={32} />
+            </div>
+            <h2 className="text-xl font-black text-slate-900 mb-2">Producto agregado</h2>
+            <p className="text-sm font-semibold text-slate-500 mb-7">Los productos se agregaron con exito al inventario.</p>
+            <button
+              onClick={() => setShowSuccessModal(false)}
+              className="w-full bg-slate-900 py-4 rounded-2xl text-white font-black text-xs uppercase tracking-widest hover:bg-emerald-600 transition-all"
+            >
+              Entendido
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── MODAL EXPORTACIÓN ── */}
       {showExportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
@@ -372,10 +522,11 @@ function AdminDashboard() {
             <div className="space-y-3">
               <button 
                 onClick={() => exportToExcel('productos')}
-                className="w-full flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group"
+                disabled={isExporting}
+                className="w-full flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group disabled:opacity-70"
               >
                 <div className="flex items-center gap-3">
-                  <Package className="text-indigo-500" size={20} />
+                  {isExporting ? <Loader2 className="text-indigo-500 animate-spin" size={20} /> : <Package className="text-indigo-500" size={20} />}
                   <span className="text-sm font-black text-slate-700">Inventario Actual</span>
                 </div>
                 <ChevronRight size={18} className="text-slate-300 group-hover:text-indigo-500" />
@@ -383,10 +534,11 @@ function AdminDashboard() {
 
               <button 
                 onClick={() => exportToExcel('historial')}
-                className="w-full flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group"
+                disabled={isExporting}
+                className="w-full flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group disabled:opacity-70"
               >
                 <div className="flex items-center gap-3">
-                  <Clock className="text-indigo-500" size={20} />
+                  {isExporting ? <Loader2 className="text-indigo-500 animate-spin" size={20} /> : <Clock className="text-indigo-500" size={20} />}
                   <span className="text-sm font-black text-slate-700">Historial de Entregas</span>
                 </div>
                 <ChevronRight size={18} className="text-slate-300 group-hover:text-indigo-500" />
@@ -405,6 +557,15 @@ function AdminDashboard() {
 
     </div>
   );
+}
+
+function mergeProductosForExport(localProductos, firestoreProductos) {
+  const productosMap = new Map();
+  [...firestoreProductos, ...localProductos].forEach(producto => {
+    if (!producto?.id) return;
+    productosMap.set(producto.id, producto);
+  });
+  return Array.from(productosMap.values());
 }
 
 export default AdminDashboard;
