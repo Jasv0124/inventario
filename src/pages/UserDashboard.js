@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { collection, onSnapshot, doc, updateDoc, addDoc, query, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, addDoc, query, where, getDocs, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, db, storage } from '../firebase';
 import { getAuth, signOut } from 'firebase/auth';
@@ -11,6 +11,7 @@ import {
   CheckCircle2, Loader2, User, Hash, 
   Ruler, LayoutDashboard
 } from 'lucide-react';
+import { DEFAULT_SEDE, getFallbackSedeByEmail, getSedeFromDisplayName, getSedeLabel, normalizeEmail } from '../utils/sedes';
 
 // Importación del historial (asumiendo que existe en la misma carpeta)
 import Historial from './historialuser';
@@ -67,6 +68,7 @@ function UserDashboard() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [formErrors, setFormErrors] = useState({});
+  const [userSede, setUserSede] = useState('');
   const navigate = useNavigate();
 
   // ─── LÓGICA ORIGINAL (MANTENIDA) ────────────────────────────────────────────
@@ -74,7 +76,7 @@ function UserDashboard() {
   useEffect(() => {
     let unsubscribeProducts = () => {};
 
-    const unsubscribeAuth = auth.onAuthStateChanged(user => {
+    const unsubscribeAuth = auth.onAuthStateChanged(async user => {
       if (!user) {
         navigate('/login');
         return;
@@ -82,10 +84,20 @@ function UserDashboard() {
 
       setIsLoading(true);
       unsubscribeProducts();
+      const resolvedSede = await resolveUserSede(user);
+      setUserSede(resolvedSede);
+
+      if (!resolvedSede) {
+        setProductos([]);
+        setError('No tienes una sede asignada. Contacta al administrador.');
+        setIsLoading(false);
+        return;
+      }
+
       unsubscribeProducts = onSnapshot(
-        collection(db, 'productos'),
+        query(collection(db, 'productos'), where('sede', '==', resolvedSede)),
         (snapshot) => {
-          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          const data = snapshot.docs.map(doc => normalizeProducto({ id: doc.id, ...doc.data() }));
           setProductos(data);
           setError(null);
           setIsLoading(false);
@@ -125,7 +137,7 @@ function UserDashboard() {
 
   const checkUserBlocked = async (cedulaVal, productoId, productoNombre) => {
     try {
-      if (!cedulaVal || !productoId || !productoNombre) return false;
+      if (!cedulaVal || !productoId || !productoNombre || !userSede) return false;
       const normalizedName = productoNombre.toLowerCase().trim();
       let period = 6;
       if (normalizedName.includes('bota')) period = 6;
@@ -139,11 +151,14 @@ function UserDashboard() {
       const q = query(
         collection(db, 'historial'),
         where('cedula', '==', cedulaVal.trim()),
-        where('productoId', '==', productoId),
-        where('fecha', '>=', date)
+        where('productoId', '==', productoId)
       );
       const snap = await getDocs(q);
-      return !snap.empty;
+      return snap.docs.some(item => {
+        const data = item.data();
+        const fecha = data.fecha?.toDate ? data.fecha.toDate() : new Date(data.fecha);
+        return (data.sede || DEFAULT_SEDE) === userSede && fecha >= date;
+      });
     } catch (e) { 
       console.error(e);
       return false; 
@@ -212,6 +227,7 @@ function UserDashboard() {
         fecha: new Date(),
         evidenciaFoto: fotoURL,
         evidenciaDanio: danioURL,
+        sede: userSede,
       });
 
       alert('Entrega registrada con éxito');
@@ -233,7 +249,7 @@ function UserDashboard() {
   // ─── FILTROS Y MEMO ─────────────────────────────────────────────────────────
 
   const filteredProductos = productos.filter(p => 
-    (p.nombre || '').toLowerCase().includes(searchTerm.toLowerCase())
+    p.nombre.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const availableGeneros = useMemo(() => 
@@ -243,6 +259,14 @@ function UserDashboard() {
   const availableTallas = useMemo(() => 
     genero && productoSeleccionado?.tallas?.[genero] ? Object.keys(productoSeleccionado.tallas[genero]) : [], 
   [genero, productoSeleccionado]);
+
+  const stockDisponible = useMemo(() => {
+    if (!productoSeleccionado) return 0;
+    if (genero && talla && productoSeleccionado.tallas?.[genero]?.[talla]) {
+      return roundNumber(productoSeleccionado.tallas[genero][talla].cantidad);
+    }
+    return roundNumber(productoSeleccionado.cantidad);
+  }, [genero, productoSeleccionado, talla]);
 
   // ─── RENDERIZADO ────────────────────────────────────────────────────────────
 
@@ -256,7 +280,7 @@ function UserDashboard() {
             <div className="w-10 h-10 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-100">
               <LayoutDashboard size={20} />
             </div>
-            <h1 className="text-lg font-black text-slate-900 tracking-tight">Entrega<span className="text-indigo-600">Pro</span></h1>
+            <h1 className="text-lg font-black text-slate-900 tracking-tight">RG<span className="text-indigo-600">Track</span></h1>
           </div>
           <div className="flex items-center gap-2">
             <button 
@@ -274,7 +298,7 @@ function UserDashboard() {
 
       <main className="max-w-2xl mx-auto px-6 pt-8">
         {mostrarHistorial ? (
-          <Historial />
+          <Historial sede={userSede} />
         ) : (
           <>
             {error && (
@@ -308,7 +332,7 @@ function UserDashboard() {
               ) : filteredProductos.length === 0 ? (
                 <div className="text-center py-20">
                   <Package size={48} className="mx-auto text-slate-100 mb-4" />
-                  <p className="text-slate-400 text-sm font-bold uppercase tracking-widest">No hay productos</p>
+                  <p className="text-slate-400 text-sm font-bold uppercase tracking-widest">No hay productos en {getSedeLabel(userSede)}</p>
                 </div>
               ) : filteredProductos.map((p) => (
                 <div 
@@ -322,7 +346,7 @@ function UserDashboard() {
                   <div className="flex-1">
                     <h3 className="text-sm font-black text-slate-800 mb-1">{p.nombre}</h3>
                     <div className="flex gap-2">
-                      <Badge variant={p.cantidad > 5 ? "success" : "warning"}>{p.cantidad} disponibles</Badge>
+                      <Badge variant={p.cantidad > 5 ? "success" : "warning"}>{roundNumber(p.cantidad)} disponibles</Badge>
                       {isSizeFilteredProduct(p) && <Badge variant="indigo">Con Tallas</Badge>}
                     </div>
                   </div>
@@ -358,6 +382,16 @@ function UserDashboard() {
             </div>
 
             <form onSubmit={entregarProducto} className="px-8 py-6 space-y-5 max-h-[70vh] overflow-y-auto">
+              <div className="flex items-center justify-between gap-4 rounded-2xl bg-indigo-50 border border-indigo-100 px-4 py-3">
+                <div>
+                  <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Disponible</p>
+                  <p className="text-2xl font-black text-indigo-700">{stockDisponible}</p>
+                </div>
+                <Badge variant={stockDisponible > 5 ? "success" : "warning"}>
+                  {genero && talla ? `${genero} ${talla}` : 'Total'}
+                </Badge>
+              </div>
+
               <InputField 
                 label="Entregado a" 
                 placeholder="Nombre completo" 
@@ -445,3 +479,41 @@ function UserDashboard() {
 }
 
 export default UserDashboard;
+
+function normalizeProducto(producto) {
+  return {
+    ...producto,
+    nombre: producto?.nombre || 'Sin nombre',
+    cantidad: roundNumber(producto?.cantidad),
+    tallas: producto?.tallas && typeof producto.tallas === 'object' ? producto.tallas : {},
+    imagen: typeof producto?.imagen === 'string' ? producto.imagen : '',
+    sede: producto?.sede || DEFAULT_SEDE
+  };
+}
+
+async function resolveUserSede(user) {
+  const authProfileSede = getSedeFromDisplayName(user?.displayName);
+  const fallbackSede = getFallbackSedeByEmail(user?.email) || authProfileSede;
+
+  try {
+    const userDoc = await getDoc(doc(db, 'usuarios', user.uid));
+    if (userDoc.exists()) {
+      return userDoc.data()?.sede || authProfileSede || fallbackSede;
+    }
+
+    const byEmail = query(
+      collection(db, 'usuarios'),
+      where('email', '==', normalizeEmail(user.email))
+    );
+    const snap = await getDocs(byEmail);
+    return snap.docs[0]?.data()?.sede || authProfileSede || fallbackSede;
+  } catch (e) {
+    console.error(e);
+    return authProfileSede || fallbackSede;
+  }
+}
+
+function roundNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number) : 0;
+}

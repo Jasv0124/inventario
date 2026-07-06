@@ -15,6 +15,7 @@ apiKey: "AIzaSyBwl2NHJxS7Yf1oI8afoe2mTC9GzujJLVM",
 
 const app = initializeApp(firebaseConfig);
 
+export { firebaseConfig };
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);   // <--- Exporta Storage

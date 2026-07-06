@@ -12,6 +12,7 @@ import {
   Trash2,
   X
 } from 'lucide-react';
+import { DEFAULT_SEDE, SEDES, getSedeLabel } from '../utils/sedes';
 
 function ProductosAdmin() {
   const [productos, setProductos] = useState([]);
@@ -19,6 +20,7 @@ function ProductosAdmin() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [productoAEliminar, setProductoAEliminar] = useState(null);
   const [busqueda, setBusqueda] = useState('');
+  const [filtroSede, setFiltroSede] = useState('todas');
   const [error, setError] = useState(null);
   const navigate = useNavigate();
 
@@ -32,7 +34,8 @@ function ProductosAdmin() {
       const snapshot = await getDocs(collection(db, 'productos'));
       const lista = snapshot.docs.map(documento => ({
         id: documento.id,
-        ...documento.data()
+        ...documento.data(),
+        sede: documento.data().sede || DEFAULT_SEDE
       }));
       setProductos(lista);
     } catch (e) {
@@ -45,17 +48,20 @@ function ProductosAdmin() {
 
   const productosFiltrados = useMemo(() => {
     const term = busqueda.trim().toLowerCase();
-    if (!term) return productos;
-    return productos.filter(producto => producto.nombre?.toLowerCase().includes(term));
-  }, [productos, busqueda]);
+    return productos.filter(producto => {
+      const matchesSede = filtroSede === 'todas' || producto.sede === filtroSede;
+      const matchesSearch = !term || producto.nombre?.toLowerCase().includes(term);
+      return matchesSede && matchesSearch;
+    });
+  }, [productos, busqueda, filtroSede]);
 
   const totalUnidades = useMemo(() => {
-    return productos.reduce((total, producto) => total + (parseInt(producto.cantidad) || 0), 0);
-  }, [productos]);
+    return productosFiltrados.reduce((total, producto) => total + (parseInt(producto.cantidad) || 0), 0);
+  }, [productosFiltrados]);
 
   const totalVariantes = useMemo(() => {
-    return productos.reduce((total, producto) => total + getVariantes(producto).length, 0);
-  }, [productos]);
+    return productosFiltrados.reduce((total, producto) => total + getVariantes(producto).length, 0);
+  }, [productosFiltrados]);
 
   const confirmarEliminarProducto = async () => {
     if (!productoAEliminar) return;
@@ -114,7 +120,7 @@ function ProductosAdmin() {
         )}
 
         <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <StatCard title="Productos" value={productos.length} icon={<Package size={22} />} color="text-indigo-600 bg-indigo-50" />
+          <StatCard title="Productos" value={productosFiltrados.length} icon={<Package size={22} />} color="text-indigo-600 bg-indigo-50" />
           <StatCard title="Unidades" value={totalUnidades} icon={<Boxes size={22} />} color="text-cyan-600 bg-cyan-50" />
           <StatCard title="Variantes" value={totalVariantes} icon={<Search size={22} />} color="text-emerald-600 bg-emerald-50" />
         </section>
@@ -128,14 +134,26 @@ function ProductosAdmin() {
               </p>
             </div>
 
-            <div className="relative w-full lg:w-72">
-              <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
-              <input
-                value={busqueda}
-                onChange={e => setBusqueda(e.target.value)}
-                placeholder="Buscar producto"
-                className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-2.5 pl-11 pr-4 text-sm font-semibold placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-200"
-              />
+            <div className="grid w-full gap-3 sm:grid-cols-[180px_1fr] lg:w-[460px]">
+              <select
+                value={filtroSede}
+                onChange={e => setFiltroSede(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-2.5 px-4 text-sm font-black text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-200"
+              >
+                <option value="todas">Todas las sedes</option>
+                {SEDES.map(item => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+              <div className="relative">
+                <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
+                <input
+                  value={busqueda}
+                  onChange={e => setBusqueda(e.target.value)}
+                  placeholder="Buscar producto"
+                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-2.5 pl-11 pr-4 text-sm font-semibold placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-200"
+                />
+              </div>
             </div>
           </div>
 
@@ -237,7 +255,7 @@ function ProductCard({ producto, onDelete }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-sm font-black text-slate-900 truncate">{producto.nombre}</h3>
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{producto.cantidad || 0} unidades</p>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{producto.cantidad || 0} unidades · {getSedeLabel(producto.sede)}</p>
         </div>
         <button
           onClick={onDelete}

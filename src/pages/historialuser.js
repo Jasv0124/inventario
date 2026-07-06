@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import { 
   Package, Clock, X, BoxSelect, User, 
-  Hash, Ruler, Calendar, ChevronRight, Search, 
+  Calendar, ChevronRight, Search, 
   ArrowLeft, ClipboardList, ChevronDown
 } from "lucide-react";
 
@@ -24,6 +24,13 @@ const formatFecha = (fecha) => {
 };
 
 // ─── COMPONENTES DE APOYO ─────────────────────────────────────────────────────
+
+const getFechaTime = (fecha) => {
+  if (!fecha) return 0;
+  if (fecha.seconds) return fecha.seconds * 1000;
+  const date = new Date(fecha);
+  return isNaN(date.getTime()) ? 0 : date.getTime();
+};
 
 const Badge = ({ children, variant = "default" }) => {
   const styles = {
@@ -54,7 +61,7 @@ const SkeletonCard = () => (
 
 // ─── COMPONENTE PRINCIPAL ─────────────────────────────────────────────────────
 
-function Historial() {
+function Historial({ sede }) {
   const [historial, setHistorial] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
@@ -70,9 +77,16 @@ function Historial() {
   useEffect(() => {
     const fetchHistorial = async () => {
       try {
-        const q = query(collection(db, "historial"), orderBy("fecha", "desc"));
-        const snap = await getDocs(q);
-        setHistorial(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        if (!sede) {
+          setHistorial([]);
+          return;
+        }
+
+        const snap = await getDocs(query(collection(db, "historial"), where("sede", "==", sede)));
+        const data = snap.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .sort((a, b) => getFechaTime(b.fecha) - getFechaTime(a.fecha));
+        setHistorial(data);
       } catch (e) {
         console.error(e);
       } finally {
@@ -80,7 +94,7 @@ function Historial() {
       }
     };
     fetchHistorial();
-  }, []);
+  }, [sede]);
 
   const filteredData = historial.filter(item => 
     item.productoNombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||

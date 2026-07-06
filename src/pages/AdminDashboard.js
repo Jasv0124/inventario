@@ -6,6 +6,7 @@ import { db, storage, auth } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { v4 as uuidv4 } from 'uuid';
+import { DEFAULT_SEDE, SEDES, getSedeLabel } from '../utils/sedes';
 import { 
   Plus, Trash2, Download, LogOut, UserPlus, 
   Package, Users, LayoutDashboard, Image as ImageIcon,
@@ -16,10 +17,13 @@ import {
 
 function AdminDashboard() {
   const [nombre, setNombre] = useState('');
+  const [sede, setSede] = useState(DEFAULT_SEDE);
   const [tallas, setTallas] = useState([{ genero: '', talla: '', cantidad: '' }]);
   const [imagen, setImagen] = useState(null);
   const [usuarios, setUsuarios] = useState([]);
   const [productos, setProductos] = useState([]);
+  const [filtroSedeInventario, setFiltroSedeInventario] = useState('todas');
+  const [sedeExportacion, setSedeExportacion] = useState('todas');
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -65,7 +69,7 @@ function AdminDashboard() {
     try {
       setIsLoadingProductos(true);
       const snap = await getDocs(collection(db, 'productos'));
-      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const list = snap.docs.map(doc => normalizeProducto({ id: doc.id, ...doc.data() }));
       setProductos(list);
     } catch (e) {
       console.error(e);
@@ -98,6 +102,7 @@ function AdminDashboard() {
   const validateForm = () => {
     const errors = {};
     if (!nombre.trim()) errors.nombre = 'Requerido';
+    if (!sede) errors.sede = 'Requerido';
     tallas.forEach((t, i) => {
       if (!t.genero) errors[`genero_${i}`] = '!';
       if (!t.talla) errors[`talla_${i}`] = '!';
@@ -127,21 +132,23 @@ function AdminDashboard() {
         tallas: tallasObj,
         cantidad: total,
         imagen: '',
+        sede,
         fechaCreacion: new Date()
       };
 
       const docRef = await addDoc(collection(db, 'productos'), productoData);
-      setProductos(prev => [{ id: docRef.id, ...productoData }, ...prev]);
+      setProductos(prev => [normalizeProducto({ id: docRef.id, ...productoData }), ...prev]);
       setShowSuccessModal(true);
 
       setNombre('');
+      setSede(DEFAULT_SEDE);
       setTallas([{ genero: '', talla: '', cantidad: '' }]);
       const imagenParaSubir = imagen;
       setImagen(null);
       if (imageInputRef.current) imageInputRef.current.value = '';
 
       if (imagenParaSubir) {
-        uploadProductImage(docRef.id, imagenParaSubir);
+        void uploadProductImage(docRef.id, imagenParaSubir);
       }
     } catch (e) {
       console.error(e);
@@ -158,7 +165,7 @@ function AdminDashboard() {
       const imageUrl = await getDownloadURL(snap.ref);
       await updateDoc(doc(db, 'productos', productId), { imagen: imageUrl });
       setProductos(prev => prev.map(producto => (
-        producto.id === productId ? { ...producto, imagen: imageUrl } : producto
+        producto.id === productId ? normalizeProducto({ ...producto, imagen: imageUrl }) : producto
       )));
     } catch (e) {
       console.error(e);
@@ -171,15 +178,17 @@ function AdminDashboard() {
     try {
       let data = [];
       const snap = await getDocs(collection(db, type));
-      const items = type === 'productos'
+      const rawItems = type === 'productos'
         ? mergeProductosForExport(productos, snap.docs.map(d => ({ id: d.id, ...d.data() })))
         : snap.docs.map(d => d.data());
+      const items = filterItemsBySede(rawItems, sedeExportacion);
       
       if (type === 'productos') {
         items.forEach(p => {
           if (!p.tallas || Object.keys(p.tallas).length === 0) {
             data.push({
               Producto: p.nombre || 'Sin nombre',
+              Sede: getSedeLabel(p.sede),
               Genero: 'N/A',
               Talla: 'N/A',
               Cantidad: p.cantidad || 0
@@ -191,6 +200,7 @@ function AdminDashboard() {
             Object.keys(p.tallas[g] || {}).forEach(t => {
               data.push({ 
                 Producto: p.nombre, 
+                Sede: getSedeLabel(p.sede),
                 Género: g, 
                 Talla: t, 
                 Cantidad: p.tallas[g][t].cantidad 
@@ -208,7 +218,8 @@ function AdminDashboard() {
       const ws = XLSX.utils.json_to_sheet(data);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, type);
-      XLSX.writeFile(wb, `${type}_${new Date().toLocaleDateString()}.xlsx`);
+      const sedeSuffix = sedeExportacion === 'todas' ? 'todas_sedes' : sedeExportacion;
+      XLSX.writeFile(wb, `${type}_${sedeSuffix}_${new Date().toLocaleDateString()}.xlsx`);
     } catch (e) {
       console.error(e);
       setError('Error al exportar');
@@ -222,9 +233,14 @@ function AdminDashboard() {
     return tallas.reduce((s, t) => s + (parseInt(t.cantidad) || 0), 0);
   }, [tallas]);
 
+  const productosInventario = useMemo(() => {
+    if (filtroSedeInventario === 'todas') return productos;
+    return productos.filter(producto => producto.sede === filtroSedeInventario);
+  }, [productos, filtroSedeInventario]);
+
   const totalProductosRegistrados = useMemo(() => {
-    return productos.reduce((sum, producto) => sum + (parseInt(producto.cantidad) || 0), 0);
-  }, [productos]);
+    return productosInventario.reduce((sum, producto) => sum + (parseInt(producto.cantidad) || 0), 0);
+  }, [productosInventario]);
 
   // ─── RENDERIZADO ────────────────────────────────────────────────────────────
 
@@ -289,6 +305,19 @@ function AdminDashboard() {
                   onChange={e => setNombre(e.target.value)}
                   className={`w-full bg-slate-50 border-none rounded-2xl py-3.5 px-4 text-sm font-semibold placeholder:text-slate-300 focus:ring-2 transition-all ${formErrors.nombre ? 'ring-2 ring-red-100' : 'focus:ring-indigo-500/10'}`}
                 />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Sede del inventario</label>
+                <select
+                  value={sede}
+                  onChange={e => setSede(e.target.value)}
+                  className={`w-full bg-slate-50 border-none rounded-2xl py-3.5 px-4 text-sm font-semibold focus:ring-2 transition-all ${formErrors.sede ? 'ring-2 ring-red-100' : 'focus:ring-indigo-500/10'}`}
+                >
+                  {SEDES.map(item => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="space-y-3">
@@ -398,22 +427,37 @@ function AdminDashboard() {
                 </div>
                 <div>
                   <h3 className="text-lg font-black text-slate-900 tracking-tight">Productos</h3>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Inventario registrado</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    {filtroSedeInventario === 'todas' ? 'Inventario registrado' : getSedeLabel(filtroSedeInventario)}
+                  </p>
                 </div>
               </div>
-              <button
-                onClick={() => navigate('/productos-admin')}
-                className="w-10 h-10 rounded-2xl bg-slate-50 text-slate-500 flex items-center justify-center hover:bg-cyan-50 hover:text-cyan-600 transition-all"
-                title="Ver todos los productos"
-              >
-                <Eye size={18} />
-              </button>
+              <div className="flex items-center gap-2">
+                <select
+                  value={filtroSedeInventario}
+                  onChange={e => setFiltroSedeInventario(e.target.value)}
+                  className="max-w-[132px] rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs font-black text-slate-600 outline-none transition focus:border-cyan-200 focus:ring-2 focus:ring-cyan-100"
+                  title="Filtrar por sede"
+                >
+                  <option value="todas">Todas</option>
+                  {SEDES.map(item => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => navigate('/productos-admin')}
+                  className="w-10 h-10 rounded-2xl bg-slate-50 text-slate-500 flex items-center justify-center hover:bg-cyan-50 hover:text-cyan-600 transition-all"
+                  title="Ver todos los productos"
+                >
+                  <Eye size={18} />
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3 mb-5">
               <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Productos</p>
-                <p className="text-2xl font-black text-slate-900">{productos.length}</p>
+                <p className="text-2xl font-black text-slate-900">{productosInventario.length}</p>
               </div>
               <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Unidades</p>
@@ -424,12 +468,14 @@ function AdminDashboard() {
             <div className="space-y-3 max-h-[320px] overflow-y-auto pr-2">
               {isLoadingProductos ? (
                 [1,2,3].map(i => <div key={i} className="h-16 bg-slate-50 rounded-2xl animate-pulse" />)
-              ) : productos.length === 0 ? (
+              ) : productosInventario.length === 0 ? (
                 <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 text-center">
                   <p className="text-sm font-black text-slate-700">No hay productos registrados</p>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Agrega el primero desde el formulario</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                    {filtroSedeInventario === 'todas' ? 'Agrega el primero desde el formulario' : `Sin inventario en ${getSedeLabel(filtroSedeInventario)}`}
+                  </p>
                 </div>
-              ) : productos.map(producto => (
+              ) : productosInventario.map(producto => (
                 <div key={producto.id} className="flex items-center justify-between gap-3 p-3 bg-slate-50 rounded-2xl border border-slate-100/50 hover:bg-white hover:border-cyan-100 transition-all">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shrink-0">
@@ -441,7 +487,7 @@ function AdminDashboard() {
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-black text-slate-800 truncate">{producto.nombre}</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">{producto.cantidad || 0} unidades</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">{producto.cantidad || 0} unidades · {getSedeLabel(producto.sede)}</p>
                     </div>
                   </div>
                   <ChevronRight size={18} className="text-slate-300 shrink-0" />
@@ -472,7 +518,7 @@ function AdminDashboard() {
                     </div>
                     <div>
                       <p className="text-sm font-black text-slate-800">{u.nombre}</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">{u.rol || 'Operador'}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">{u.rol || 'Operador'} · {getSedeLabel(u.sede)}</p>
                     </div>
                   </div>
                   <button onClick={() => handleEliminarUsuario(u.id)} className="w-8 h-8 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100">
@@ -517,7 +563,21 @@ function AdminDashboard() {
           <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm" onClick={() => setShowExportModal(false)} />
           <div className="relative w-full max-w-sm bg-white rounded-[40px] p-8 shadow-2xl">
             <h2 className="text-xl font-black text-slate-900 mb-2">Exportar Datos</h2>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-8">Selecciona el reporte</p>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6">Selecciona sede y reporte</p>
+
+            <div className="mb-5">
+              <label className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400">Sede</label>
+              <select
+                value={sedeExportacion}
+                onChange={e => setSedeExportacion(e.target.value)}
+                className="w-full rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm font-black text-slate-700 outline-none transition focus:border-indigo-200 focus:ring-2 focus:ring-indigo-100"
+              >
+                <option value="todas">Todas las sedes</option>
+                {SEDES.map(item => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+            </div>
             
             <div className="space-y-3">
               <button 
@@ -563,9 +623,26 @@ function mergeProductosForExport(localProductos, firestoreProductos) {
   const productosMap = new Map();
   [...firestoreProductos, ...localProductos].forEach(producto => {
     if (!producto?.id) return;
-    productosMap.set(producto.id, producto);
+    productosMap.set(producto.id, normalizeProducto(producto));
   });
   return Array.from(productosMap.values());
+}
+
+function filterItemsBySede(items, sede) {
+  if (sede === 'todas') return items;
+  return items.filter(item => (item?.sede || DEFAULT_SEDE) === sede);
+}
+
+function normalizeProducto(producto) {
+  return {
+    ...producto,
+    id: producto?.id || uuidv4(),
+    nombre: producto?.nombre || 'Sin nombre',
+    cantidad: parseInt(producto?.cantidad) || 0,
+    tallas: producto?.tallas && typeof producto.tallas === 'object' ? producto.tallas : {},
+    imagen: typeof producto?.imagen === 'string' ? producto.imagen : '',
+    sede: producto?.sede || DEFAULT_SEDE
+  };
 }
 
 export default AdminDashboard;
