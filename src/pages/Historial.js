@@ -3,9 +3,9 @@ import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { 
-  Home, Package, Clock, X, Search, 
-  ChevronRight, Calendar, User, Hash, 
-  Ruler, ClipboardList, Eye, ArrowLeft, ChevronDown,
+  Package, Clock, X, Search, 
+  ChevronRight, Calendar, User, 
+  ClipboardList, Eye, ArrowLeft, ChevronDown,
   LayoutGrid
 } from 'lucide-react';
 

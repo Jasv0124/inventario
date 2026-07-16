@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, lazy, Suspense } from 'react';
 import { collection, onSnapshot, doc, updateDoc, addDoc, query, where, getDocs, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, db, storage } from '../firebase';
@@ -13,8 +13,7 @@ import {
 } from 'lucide-react';
 import { DEFAULT_SEDE, getFallbackSedeByEmail, getSedeFromDisplayName, getSedeLabel, normalizeEmail } from '../utils/sedes';
 
-// Importación del historial (asumiendo que existe en la misma carpeta)
-import Historial from './historialuser';
+const Historial = lazy(() => import('./historialuser'));
 
 // ─── COMPONENTES DE APOYO ─────────────────────────────────────────────────────
 
@@ -75,6 +74,7 @@ function UserDashboard() {
 
   useEffect(() => {
     let unsubscribeProducts = () => {};
+    let legacyDefaultSedeLoaded = false;
 
     const unsubscribeAuth = auth.onAuthStateChanged(async user => {
       if (!user) {
@@ -101,6 +101,11 @@ function UserDashboard() {
           setProductos(data);
           setError(null);
           setIsLoading(false);
+
+          if (resolvedSede === DEFAULT_SEDE && !legacyDefaultSedeLoaded) {
+            legacyDefaultSedeLoaded = true;
+            void loadLegacyDefaultSedeProducts(data, setProductos);
+          }
         },
         (err) => {
           console.error(err);
@@ -124,16 +129,7 @@ function UserDashboard() {
     } catch (e) { console.error(e); }
   };
 
-  const isSizeFilteredProduct = (producto) => {
-    if (!producto) return false;
-    const nombreLower = (producto.nombre || '').toLowerCase().trim();
-    return (
-      nombreLower.includes('camiseta') || nombreLower.includes('guante') ||
-      nombreLower.includes('bota') || nombreLower.includes('pantalon') ||
-      nombreLower.includes('gorras') || nombreLower.includes('chaleco') ||
-      ['manga_larga', 'polo', 'operativa', 'guantes', 'botas', 'pantalones'].includes(producto.tipo?.toLowerCase())
-    );
-  };
+  const isSizeFilteredProduct = useCallback((producto) => Boolean(producto?.requiresSizeSelection), []);
 
   const checkUserBlocked = async (cedulaVal, productoId, productoNombre) => {
     try {
@@ -248,9 +244,18 @@ function UserDashboard() {
 
   // ─── FILTROS Y MEMO ─────────────────────────────────────────────────────────
 
-  const filteredProductos = productos.filter(p => 
-    p.nombre.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredProductos = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return productos;
+    return productos.filter(p => p.searchName.includes(term));
+  }, [productos, searchTerm]);
+
+  const openEntregaModal = useCallback((producto) => {
+    setProductoSeleccionado(producto);
+    setGenero('');
+    setTalla('');
+    setModalEntregarOpen(true);
+  }, []);
 
   const availableGeneros = useMemo(() => 
     productoSeleccionado?.tallas ? Object.keys(productoSeleccionado.tallas) : [], 
@@ -298,7 +303,9 @@ function UserDashboard() {
 
       <main className="max-w-2xl mx-auto px-6 pt-8">
         {mostrarHistorial ? (
-          <Historial sede={userSede} />
+          <Suspense fallback={<div className="h-32 bg-slate-50 rounded-[24px] animate-pulse" />}>
+            <Historial sede={userSede} />
+          </Suspense>
         ) : (
           <>
             {error && (
@@ -335,25 +342,11 @@ function UserDashboard() {
                   <p className="text-slate-400 text-sm font-bold uppercase tracking-widest">No hay productos en {getSedeLabel(userSede)}</p>
                 </div>
               ) : filteredProductos.map((p) => (
-                <div 
+                <ProductRow
                   key={p.id}
-                  onClick={() => { setProductoSeleccionado(p); setModalEntregarOpen(true); }}
-                  className="group bg-white border border-slate-100 rounded-[28px] p-4 flex items-center gap-4 hover:border-indigo-100 hover:shadow-xl hover:shadow-indigo-500/5 transition-all duration-300 cursor-pointer active:scale-[0.98]"
-                >
-                  <div className="w-16 h-16 rounded-2xl bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100">
-                    {p.imagen ? <img src={p.imagen} className="w-full h-full object-cover" alt="" /> : <Package size={24} className="text-slate-200" />}
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-sm font-black text-slate-800 mb-1">{p.nombre}</h3>
-                    <div className="flex gap-2">
-                      <Badge variant={p.cantidad > 5 ? "success" : "warning"}>{roundNumber(p.cantidad)} disponibles</Badge>
-                      {isSizeFilteredProduct(p) && <Badge variant="indigo">Con Tallas</Badge>}
-                    </div>
-                  </div>
-                  <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-300 group-hover:bg-indigo-600 group-hover:text-white transition-all">
-                    <ChevronRight size={18} />
-                  </div>
-                </div>
+                  producto={p}
+                  onOpen={openEntregaModal}
+                />
               ))}
             </div>
           </>
@@ -444,7 +437,13 @@ function UserDashboard() {
               {/* Evidencias */}
               <div className="grid grid-cols-2 gap-4">
                 <label className="cursor-pointer group">
-                  <input type="file" className="hidden" onChange={e => setEvidenciaFoto(e.target.files[0])} />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={e => setEvidenciaFoto(e.target.files[0])}
+                  />
                   <div className={`h-24 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center transition-all ${evidenciaFoto ? 'border-emerald-200 bg-emerald-50 text-emerald-600' : 'border-slate-100 bg-slate-50 text-slate-400 group-hover:border-indigo-200 group-hover:bg-indigo-50 group-hover:text-indigo-600'}`}>
                     <Camera size={20} className="mb-1" />
                     <span className="text-[10px] font-black uppercase">{evidenciaFoto ? 'Foto Lista' : 'Evidencia'}</span>
@@ -453,7 +452,13 @@ function UserDashboard() {
 
                 {(showEvidenciaDanio || isBlockedForAllProducts) && (
                   <label className="cursor-pointer group animate-in zoom-in-95">
-                    <input type="file" className="hidden" onChange={e => setEvidenciaDanio(e.target.files[0])} />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={e => setEvidenciaDanio(e.target.files[0])}
+                    />
                     <div className={`h-24 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center transition-all ${evidenciaDanio ? 'border-red-200 bg-red-50 text-red-600' : 'border-amber-100 bg-amber-50 text-amber-400 group-hover:border-red-200 group-hover:bg-red-50 group-hover:text-red-600'}`}>
                       <AlertTriangle size={20} className="mb-1" />
                       <span className="text-[10px] font-black uppercase">{evidenciaDanio ? 'Daño Listo' : 'Evid. Daño'}</span>
@@ -480,15 +485,83 @@ function UserDashboard() {
 
 export default UserDashboard;
 
+const ProductRow = React.memo(function ProductRow({ producto, onOpen }) {
+  return (
+    <div
+      onClick={() => onOpen(producto)}
+      className="group bg-white border border-slate-100 rounded-[28px] p-4 flex items-center gap-4 hover:border-indigo-100 hover:shadow-xl hover:shadow-indigo-500/5 transition-all duration-300 cursor-pointer active:scale-[0.98]"
+    >
+      <div className="w-16 h-16 rounded-2xl bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100">
+        {producto.imagen ? (
+          <img
+            src={producto.imagen}
+            className="w-full h-full object-cover"
+            alt=""
+            loading="lazy"
+            decoding="async"
+          />
+        ) : (
+          <Package size={24} className="text-slate-200" />
+        )}
+      </div>
+      <div className="flex-1">
+        <h3 className="text-sm font-black text-slate-800 mb-1">{producto.nombre}</h3>
+        <div className="flex gap-2">
+          <Badge variant={producto.cantidad > 5 ? "success" : "warning"}>{producto.cantidad} disponibles</Badge>
+          {producto.requiresSizeSelection && <Badge variant="indigo">Con Tallas</Badge>}
+        </div>
+      </div>
+      <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-300 group-hover:bg-indigo-600 group-hover:text-white transition-all">
+        <ChevronRight size={18} />
+      </div>
+    </div>
+  );
+});
+
 function normalizeProducto(producto) {
+  const nombre = producto?.nombre || 'Sin nombre';
+  const tipo = producto?.tipo?.toLowerCase() || '';
+  const searchName = nombre.toLowerCase();
+
   return {
     ...producto,
-    nombre: producto?.nombre || 'Sin nombre',
+    nombre,
     cantidad: roundNumber(producto?.cantidad),
     tallas: producto?.tallas && typeof producto.tallas === 'object' ? producto.tallas : {},
     imagen: typeof producto?.imagen === 'string' ? producto.imagen : '',
-    sede: producto?.sede || DEFAULT_SEDE
+    sede: producto?.sede || DEFAULT_SEDE,
+    searchName,
+    requiresSizeSelection: isSizeProductName(searchName, tipo)
   };
+}
+
+async function loadLegacyDefaultSedeProducts(currentProducts, setProductos) {
+  try {
+    const currentIds = new Set(currentProducts.map(producto => producto.id));
+    const snapshot = await getDocs(collection(db, 'productos'));
+    const legacyProducts = snapshot.docs
+      .filter(document => !document.data().sede && !currentIds.has(document.id))
+      .map(document => normalizeProducto({ id: document.id, ...document.data() }));
+
+    if (legacyProducts.length === 0) return;
+
+    setProductos(prev => {
+      const merged = new Map(prev.map(producto => [producto.id, producto]));
+      legacyProducts.forEach(producto => merged.set(producto.id, producto));
+      return Array.from(merged.values());
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function isSizeProductName(nombreLower, tipoLower) {
+  return (
+    nombreLower.includes('camiseta') || nombreLower.includes('guante') ||
+    nombreLower.includes('bota') || nombreLower.includes('pantalon') ||
+    nombreLower.includes('gorras') || nombreLower.includes('chaleco') ||
+    ['manga_larga', 'polo', 'operativa', 'guantes', 'botas', 'pantalones'].includes(tipoLower)
+  );
 }
 
 async function resolveUserSede(user) {
