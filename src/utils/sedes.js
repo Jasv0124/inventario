@@ -3,12 +3,15 @@ export const SEDES = [
   { value: 'arenosa', label: 'Arenosa' },
   { value: 'itagui', label: 'Itagui' },
   { value: 'cartagena', label: 'Cartagena' },
+  { value: 'ka', label: 'K.A' },
 ];
 
 export const DEFAULT_SEDE = 'galapa';
 
 const EMAIL_SEDE_MAP = {
   'lauracant@gmail.com': 'galapa',
+  'itagui@rg.com': 'itagui',
+  'ka_galapa@rg.com': 'ka',
 };
 
 const EMAIL_SEDES_MAP = {
