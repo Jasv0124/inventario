@@ -11,7 +11,7 @@ import {
   CheckCircle2, Loader2, User, Hash, 
   Ruler, LayoutDashboard
 } from 'lucide-react';
-import { DEFAULT_SEDE, getFallbackSedeByEmail, getSedeFromDisplayName, getSedeLabel, normalizeEmail } from '../utils/sedes';
+import { DEFAULT_SEDE, SEDES, getAllowedSedesByEmail, getFallbackSedeByEmail, getSedeFromDisplayName, getSedeLabel, normalizeEmail } from '../utils/sedes';
 
 const Historial = lazy(() => import('./historialuser'));
 
@@ -68,14 +68,12 @@ function UserDashboard() {
   const [error, setError] = useState(null);
   const [formErrors, setFormErrors] = useState({});
   const [userSede, setUserSede] = useState('');
+  const [allowedSedes, setAllowedSedes] = useState([]);
   const navigate = useNavigate();
 
   // ─── LÓGICA ORIGINAL (MANTENIDA) ────────────────────────────────────────────
 
   useEffect(() => {
-    let unsubscribeProducts = () => {};
-    let legacyDefaultSedeLoaded = false;
-
     const unsubscribeAuth = auth.onAuthStateChanged(async user => {
       if (!user) {
         navigate('/login');
@@ -83,26 +81,44 @@ function UserDashboard() {
       }
 
       setIsLoading(true);
-      unsubscribeProducts();
       const resolvedSede = await resolveUserSede(user);
-      setUserSede(resolvedSede);
+      const emailSedes = getAllowedSedesByEmail(user.email);
+      const resolvedAllowedSedes = emailSedes.length > 0
+        ? emailSedes
+        : (resolvedSede ? [resolvedSede] : []);
+      const initialSede = resolvedAllowedSedes.includes(resolvedSede)
+        ? resolvedSede
+        : resolvedAllowedSedes[0] || '';
 
-      if (!resolvedSede) {
+      setAllowedSedes(resolvedAllowedSedes);
+      setUserSede(initialSede);
+
+      if (!initialSede) {
         setProductos([]);
         setError('No tienes una sede asignada. Contacta al administrador.');
         setIsLoading(false);
-        return;
       }
+    });
 
-      unsubscribeProducts = onSnapshot(
-        query(collection(db, 'productos'), where('sede', '==', resolvedSede)),
+    return () => unsubscribeAuth();
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!userSede) return undefined;
+
+    setIsLoading(true);
+    setProductos([]);
+    let legacyDefaultSedeLoaded = false;
+
+    const unsubscribeProducts = onSnapshot(
+        query(collection(db, 'productos'), where('sede', '==', userSede)),
         (snapshot) => {
           const data = snapshot.docs.map(doc => normalizeProducto({ id: doc.id, ...doc.data() }));
           setProductos(data);
           setError(null);
           setIsLoading(false);
 
-          if (resolvedSede === DEFAULT_SEDE && !legacyDefaultSedeLoaded) {
+          if (userSede === DEFAULT_SEDE && !legacyDefaultSedeLoaded) {
             legacyDefaultSedeLoaded = true;
             void loadLegacyDefaultSedeProducts(data, setProductos);
           }
@@ -113,13 +129,9 @@ function UserDashboard() {
           setIsLoading(false);
         }
       );
-    });
 
-    return () => {
-      unsubscribeAuth();
-      unsubscribeProducts();
-    };
-  }, [navigate]);
+    return () => unsubscribeProducts();
+  }, [userSede]);
 
   const handleLogout = async () => {
     try {
@@ -302,6 +314,31 @@ function UserDashboard() {
       </nav>
 
       <main className="max-w-2xl mx-auto px-6 pt-8">
+        {allowedSedes.length > 1 && (
+          <div className="mb-6 rounded-3xl border border-indigo-100 bg-indigo-50 p-4">
+            <label htmlFor="sede-operacion" className="mb-2 block text-[11px] font-black uppercase tracking-widest text-indigo-500">
+              Sede que vas a administrar
+            </label>
+            <select
+              id="sede-operacion"
+              value={userSede}
+              onChange={(event) => {
+                setModalEntregarOpen(false);
+                setMostrarHistorial(false);
+                setSearchTerm('');
+                setUserSede(event.target.value);
+              }}
+              className="w-full rounded-2xl border-none bg-white px-4 py-3 text-sm font-black text-slate-800 shadow-sm focus:ring-2 focus:ring-indigo-200"
+            >
+              {SEDES
+                .filter(sede => allowedSedes.includes(sede.value))
+                .map(sede => (
+                  <option key={sede.value} value={sede.value}>{sede.label}</option>
+                ))}
+            </select>
+          </div>
+        )}
+
         {mostrarHistorial ? (
           <Suspense fallback={<div className="h-32 bg-slate-50 rounded-[24px] animate-pulse" />}>
             <Historial sede={userSede} />

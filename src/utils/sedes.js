@@ -11,12 +11,20 @@ const EMAIL_SEDE_MAP = {
   'lauracant@gmail.com': 'galapa',
 };
 
+const EMAIL_SEDES_MAP = {
+  'lauracant@gmail.com': ['galapa', 'arenosa'],
+};
+
 export function normalizeEmail(email = '') {
   return email.trim().toLowerCase();
 }
 
 export function getFallbackSedeByEmail(email) {
   return EMAIL_SEDE_MAP[normalizeEmail(email)] || '';
+}
+
+export function getAllowedSedesByEmail(email) {
+  return EMAIL_SEDES_MAP[normalizeEmail(email)] || [];
 }
 
 export function getSedeLabel(sede) {
