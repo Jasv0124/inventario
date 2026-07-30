@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useNavigate } from 'react-router-dom';
+import { DEFAULT_SEDE, SEDES, getSedeLabel } from '../utils/sedes';
 import { 
   Package, Clock, X, Search, 
   ChevronRight, Calendar, User, 
@@ -58,6 +59,7 @@ const SkeletonCard = () => (
 function Historial() {
   const [historial, setHistorial] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [filtroSede, setFiltroSede] = useState('todas');
   const [selectedItem, setSelectedItem] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [imagePreview, setImagePreview] = useState(null);
@@ -85,10 +87,14 @@ function Historial() {
     fetchHistorial();
   }, []);
 
-  const filteredData = historial.filter(item => 
-    item.productoNombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.entregadoA?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredData = historial.filter(item => {
+    const matchesSearch =
+      item.productoNombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.entregadoA?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSede =
+      filtroSede === 'todas' || (item.sede || DEFAULT_SEDE) === filtroSede;
+    return matchesSearch && matchesSede;
+  });
 
   const displayedData = filteredData.slice(0, visibleItems);
   const hasMore = visibleItems < filteredData.length;
@@ -117,20 +123,36 @@ function Historial() {
         </div>
       </header>
 
-      {/* ── BUSCADOR ── */}
+      {/* ── FILTROS ── */}
       <div className="max-w-2xl mx-auto px-6 mt-6">
-        <div className="relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-          <input 
-            type="text"
-            placeholder="Buscar por producto o persona..."
-            className="w-full bg-slate-50 border-none rounded-2xl py-4 pl-12 pr-4 text-sm font-semibold placeholder:text-slate-300 focus:ring-2 focus:ring-indigo-500/10 transition-all"
-            value={searchTerm}
+        <div className="grid gap-3 sm:grid-cols-[1fr_190px]">
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+            <input 
+              type="text"
+              placeholder="Buscar por producto o persona..."
+              className="w-full bg-slate-50 border-none rounded-2xl py-4 pl-12 pr-4 text-sm font-semibold placeholder:text-slate-300 focus:ring-2 focus:ring-indigo-500/10 transition-all"
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setVisibleItems(ITEMS_PER_PAGE);
+              }}
+            />
+          </div>
+          <select
+            value={filtroSede}
             onChange={(e) => {
-              setSearchTerm(e.target.value);
+              setFiltroSede(e.target.value);
               setVisibleItems(ITEMS_PER_PAGE);
             }}
-          />
+            className="w-full bg-slate-50 border-none rounded-2xl py-4 px-4 text-sm font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500/10 transition-all"
+            aria-label="Filtrar historial por sede"
+          >
+            <option value="todas">Todas las sedes</option>
+            {SEDES.map(sede => (
+              <option key={sede.value} value={sede.value}>{sede.label}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -168,6 +190,7 @@ function Historial() {
                   </div>
                   <p className="text-xs font-semibold text-slate-400 truncate mb-2">{item.entregadoA}</p>
                   <div className="flex gap-1.5">
+                    <Badge>{getSedeLabel(item.sede || DEFAULT_SEDE)}</Badge>
                     <Badge variant="indigo">Talla {item.talla}</Badge>
                     <Badge variant="success">{item.cantidadEntregada} Unid.</Badge>
                   </div>
@@ -226,6 +249,7 @@ function Historial() {
 
               <div className="space-y-3 mt-4">
                 <InfoRow icon={<Package size={16}/>} label="Producto" value={selectedItem.productoNombre} />
+                <InfoRow icon={<LayoutGrid size={16}/>} label="Sede" value={getSedeLabel(selectedItem.sede || DEFAULT_SEDE)} />
                 <InfoRow icon={<User size={16}/>} label="Entregado a" value={selectedItem.entregadoA} />
                 <div className="grid grid-cols-2 gap-3">
                   <InfoBox label="Talla" value={selectedItem.talla} />
