@@ -4,7 +4,6 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { db, storage, auth } from '../firebase';
 import { useNavigate } from 'react-router-dom';
-import * as XLSX from 'xlsx';
 import { v4 as uuidv4 } from 'uuid';
 import { DEFAULT_SEDE, SEDES, getSedeLabel } from '../utils/sedes';
 import { 
@@ -176,6 +175,7 @@ function AdminDashboard() {
   const exportToExcel = async (type) => {
     setIsExporting(true);
     try {
+      const XLSX = await import('xlsx');
       let data = [];
       const snap = await getDocs(collection(db, type));
       const rawItems = type === 'productos'
@@ -480,7 +480,7 @@ function AdminDashboard() {
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shrink-0">
                       {producto.imagen ? (
-                        <img src={producto.imagen} alt={producto.nombre} className="w-full h-full object-cover" />
+                        <img src={producto.imagen} alt={producto.nombre} className="w-full h-full object-cover" loading="lazy" decoding="async" />
                       ) : (
                         <Package size={18} className="text-slate-300" />
                       )}

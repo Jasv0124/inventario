@@ -11,6 +11,7 @@ export const DEFAULT_SEDE = 'galapa';
 const EMAIL_SEDE_MAP = {
   'lauracant@gmail.com': 'galapa',
   'itagui@rg.com': 'itagui',
+  'cartagena@rg.com': 'cartagena',
   'ka_galapa@rg.com': 'ka',
 };
 

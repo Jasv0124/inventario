@@ -27,7 +27,7 @@ function TodosProductos() {
         {productos.map(producto => (
           <div key={producto.id} className="bg-white shadow p-4 rounded flex flex-col items-center">
             {producto.imagen && (
-              <img src={producto.imagen} alt={producto.nombre} className="w-24 h-24 object-cover mb-2" />
+              <img src={producto.imagen} alt={producto.nombre} className="w-24 h-24 object-cover mb-2" loading="lazy" decoding="async" />
             )}
             <h3 className="font-semibold">{producto.nombre}</h3>
             <p className="mb-2">Cantidad: {producto.cantidad}</p>

@@ -53,7 +53,7 @@ function UserDashboard() {
   const [searchTerm, setSearchTerm] = useState("");
   const [modalEntregarOpen, setModalEntregarOpen] = useState(false);
   const [productoSeleccionado, setProductoSeleccionado] = useState(null);
-  const [cantidadEntregar] = useState(1);
+  const [cantidadEntregar, setCantidadEntregar] = useState(1);
   const [entregadoA, setEntregadoA] = useState('');
   const [cedula, setCedula] = useState('');
   const [genero, setGenero] = useState('');
@@ -175,8 +175,14 @@ function UserDashboard() {
 
   const validateForm = () => {
     const errors = {};
+    const cantidad = Number(cantidadEntregar);
     if (!entregadoA.trim()) errors.entregadoA = 'Requerido';
     if (!cedula.match(/^\d{8,}$/)) errors.cedula = 'Cédula inválida';
+    if (!Number.isInteger(cantidad) || cantidad < 1) {
+      errors.cantidadEntregar = 'Ingresa una cantidad válida';
+    } else if (cantidad > stockDisponible) {
+      errors.cantidadEntregar = `Solo hay ${stockDisponible} disponibles`;
+    }
     if (!evidenciaFoto) errors.evidenciaFoto = 'Sube foto de evidencia';
     if (isSizeFilteredProduct(productoSeleccionado)) {
       if (!genero) errors.genero = 'Selecciona género';
@@ -195,6 +201,7 @@ function UserDashboard() {
 
     try {
       setIsSubmitting(true);
+      const cantidad = Number(cantidadEntregar);
       const isBlocked = await checkUserBlocked(cedula, productoSeleccionado.id, productoSeleccionado.nombre);
       
       if (isBlocked && !evidenciaDanio) {
@@ -215,10 +222,10 @@ function UserDashboard() {
         danioURL = await getDownloadURL(snapDanio.ref);
       }
 
-      const updateData = { cantidad: productoSeleccionado.cantidad - cantidadEntregar };
+      const updateData = { cantidad: productoSeleccionado.cantidad - cantidad };
       if (isSizeFilteredProduct(productoSeleccionado)) {
         const newTallas = { ...productoSeleccionado.tallas };
-        newTallas[genero][talla].cantidad -= cantidadEntregar;
+        newTallas[genero][talla].cantidad -= cantidad;
         updateData.tallas = newTallas;
       }
 
@@ -226,7 +233,7 @@ function UserDashboard() {
       await addDoc(collection(db, 'historial'), {
         productoId: productoSeleccionado.id,
         productoNombre: productoSeleccionado.nombre,
-        cantidadEntregada: cantidadEntregar,
+        cantidadEntregada: cantidad,
         entregadoA,
         cedula: cedula.trim(),
         talla,
@@ -243,6 +250,7 @@ function UserDashboard() {
       // Reset form
       setEntregadoA('');
       setCedula('');
+      setCantidadEntregar(1);
       setEvidenciaFoto(null);
       setEvidenciaDanio(null);
       setShowEvidenciaDanio(false);
@@ -264,8 +272,10 @@ function UserDashboard() {
 
   const openEntregaModal = useCallback((producto) => {
     setProductoSeleccionado(producto);
+    setCantidadEntregar(1);
     setGenero('');
     setTalla('');
+    setFormErrors({});
     setModalEntregarOpen(true);
   }, []);
 
@@ -421,6 +431,20 @@ function UserDashboard() {
                   {genero && talla ? `${genero} ${talla}` : 'Total'}
                 </Badge>
               </div>
+
+              <InputField
+                label="Cantidad a entregar"
+                placeholder="Ej. 1"
+                icon={Hash}
+                type="number"
+                min="1"
+                max={stockDisponible}
+                step="1"
+                inputMode="numeric"
+                value={cantidadEntregar}
+                onChange={e => setCantidadEntregar(e.target.value)}
+                error={formErrors.cantidadEntregar}
+              />
 
               <InputField 
                 label="Entregado a" 

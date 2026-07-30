@@ -170,7 +170,7 @@ function Historial({ sede }) {
               >
                 <div className="relative shrink-0">
                   {item.evidenciaFoto ? (
-                    <img src={item.evidenciaFoto} className="w-14 h-14 rounded-2xl object-cover shadow-sm" alt="" />
+                    <img src={item.evidenciaFoto} className="w-14 h-14 rounded-2xl object-cover shadow-sm" alt="" loading="lazy" decoding="async" />
                   ) : (
                     <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center border border-slate-100">
                       <Package size={20} className="text-slate-200" />

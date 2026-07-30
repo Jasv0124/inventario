@@ -454,7 +454,7 @@ function ProductCard({ producto, onEdit, onDelete }) {
     <article className="border border-slate-100 rounded-2xl bg-white p-3 shadow-sm hover:shadow-lg hover:shadow-slate-200/70 transition-all">
       <div className="aspect-[5/3] rounded-xl bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-3">
         {producto.imagen ? (
-          <img src={producto.imagen} alt={producto.nombre} className="w-full h-full object-cover" />
+          <img src={producto.imagen} alt={producto.nombre} className="w-full h-full object-cover" loading="lazy" decoding="async" />
         ) : (
           <Package size={34} className="text-slate-300" />
         )}
